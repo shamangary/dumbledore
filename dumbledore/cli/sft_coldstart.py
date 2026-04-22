@@ -9,6 +9,22 @@ import inspect
 import sys
 from pathlib import Path
 
+# Gemma 4 (incl. E2B) uses Gemma4ClippableLinear wrapping nn.Linear; PEFT only injects on Linear/Conv/etc.,
+# so we match the inner submodules, e.g. `.../self_attn/q_proj/linear` (name suffix `.q_proj.linear`).
+def _lora_target_modules_for_model(model) -> list[str]:
+    for m in model.modules():
+        if type(m).__name__ == "Gemma4ClippableLinear":
+            return [
+                "q_proj.linear",
+                "k_proj.linear",
+                "v_proj.linear",
+                "o_proj.linear",
+                "gate_proj.linear",
+                "up_proj.linear",
+                "down_proj.linear",
+            ]
+    return ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
 
 def main() -> int:
     import argparse
@@ -70,13 +86,13 @@ def main() -> int:
         a.base_model,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     )
     lora = LoraConfig(
         r=8,
         lora_alpha=16,
         lora_dropout=0.05,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=_lora_target_modules_for_model(model),
         task_type="CAUSAL_LM",
     )
     targs = SFTConfig(
@@ -85,8 +101,9 @@ def main() -> int:
         gradient_accumulation_steps=4,
         num_train_epochs=a.epochs,
         learning_rate=1e-4,
-        max_seq_length=2048,
+        max_length=2048,
         logging_steps=5,
+        dataset_text_field="text",
     )
     a.out.mkdir(parents=True, exist_ok=True)
     params = list(inspect.signature(SFTTrainer.__init__).parameters)
@@ -97,11 +114,10 @@ def main() -> int:
             train_dataset=ds,
             peft_config=lora,
             processing_class=tok,
-            dataset_text_field="text",
         )
     else:
         trainer = SFTTrainer(
-            model=model, args=targs, train_dataset=ds, peft_config=lora, tokenizer=tok, dataset_text_field="text"
+            model=model, args=targs, train_dataset=ds, peft_config=lora, tokenizer=tok
         )
     trainer.train()
     trainer.save_model(str(a.out))

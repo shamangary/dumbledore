@@ -5,19 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dumbledore"
 version = "0.1.0"
-description = "DeepFace GT + verl RL for Gemma 4 E2B"
+description = "DeepFace pseudo-GT, verl Parquet, VLM+RL reward"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "pandas>=2.0",
-  "pyarrow>=14.0",
+  "pyarrow>=15.0",
   "pyyaml>=6.0",
+  "numexpr>=2.10",
+  "bottleneck>=1.4",
+  "pillow>=9.0",
 ]
 
 [project.optional-dependencies]
+# Stage 1 LFW download: sklearn + SciPy wheels aligned with NumPy 2
+lfw = ["scikit-learn>=1.4.0", "scipy>=1.11.0"]
+# WIDER FACE subset via HuggingFace (streaming; 2.x required — Hub loading script not supported in datasets 3+)
+wider = ["datasets>=2.16,<3", "huggingface-hub>=0.20.0"]
 dev = ["pytest>=7.0", "jsonschema>=4.0", "deepface>=0.0.93"]
-face = ["deepface>=0.0.93", "tf-keras", "tensorflow>=2.0"]
+# torch: required by DeepFace when ground_truth.is_real (anti-spoofing)
+face = ["deepface>=0.0.93", "tf-keras", "tensorflow>=2.0", "torch>=2.0"]
 sft = ["transformers>=4.50", "trl>=0.9", "torch>=2.0", "accelerate", "peft", "bitsandbytes; platform_system != 'Windows'"]
+report = ["matplotlib>=3.7", "pillow>=10.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

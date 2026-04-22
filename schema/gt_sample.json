@@ -1,0 +1,18 @@
+{
+  "0": {
+    "bbox": [120, 80, 96, 96],
+    "age": 32,
+    "emotion": "neutral",
+    "gender": "Woman",
+    "race": "white",
+    "is_real": true
+  },
+  "1": {
+    "bbox": [400, 60, 88, 88],
+    "age": 45,
+    "emotion": "happy",
+    "gender": "Man",
+    "race": "asian",
+    "is_real": true
+  }
+}

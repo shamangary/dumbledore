@@ -1,0 +1,74 @@
+# WIDER FACE pipeline example (HuggingFace streaming subset — not the full 1.5GB download).
+# Copy to `configs/pipeline.yaml` or pass `--config`.
+#
+#   pip install -e ".[wider]"   # needs datasets 2.x (see README)
+# License: WIDER is CC BY-NC-ND 4.0 (non-commercial) — comply before use.
+#
+# For LFW (scikit-learn) instead, use `pipeline.lfw.example.yaml`.
+
+hf_model_id: google/gemma-4-E2B-it
+
+deepface:
+  model_name: Facenet512
+  detector_backend: opencv
+  include_facenet512: true
+  # Many faces possible per image; cap what goes into the GT string.
+  max_faces: 5
+  # Full images: bboxes are meaningful in pixel space (unlike tiny LFW crops).
+  ground_truth:
+    bbox: true
+    age: true
+    gender: true
+    emotion: true
+    race: true
+    is_real: false
+
+data:
+  num_images: 100
+  train_ratio: 0.8
+  val_ratio: 0.1
+  seed: 42
+  # Use a dedicated folder if you also keep LFW under data/raw_images
+  raw_dir: data/wider_raw
+  jsonl: data/gt_wider.jsonl
+  parquet_dir: data/verl_wider
+
+dataset:
+  name: wider_face
+  config_name: null
+  # train | validation (aliases: val, dev) | test
+  split: train
+  image_column: image
+  hf_id: CUHK-CSE/wider_face
+
+# `by_dataset.wider_face` must match `deepface.ground_truth` (all of bbox, age, gender, emotion, race below).
+# Top-level `null` here means “fall back”; WIDER text is in `wider_face` only.
+prompt:
+  system_instruction: null
+  user: null
+  by_dataset:
+    wider_face:
+      system_instruction: |
+        You are a face analysis assistant. Images are full in-the-wild scenes. Output exactly one
+        minified JSON object, no markdown. Reference pseudo–ground truth (DeepFace) for training, not hand labels.
+      user: |
+        Image id: {image_id}. Faces are indexed "0", "1", … (sort: bbox top, then x). Multiple faces per image are possible.
+        Per-face fields (same as `deepface.ground_truth`): bbox, age, gender, emotion, race; use null if unknown.
+
+        Value domains (match DeepFace + bbox in full-image pixels):
+        - bbox: [x, y, width, height] non-negative int; top-left origin; or null
+        - age: integer ~0–120 or null
+        - gender: "Man" or "Woman" or null
+        - emotion: "angry", "disgust", "fear", "happy", "sad", "surprise", "neutral" or null
+        - race: "asian", "indian", "black", "white", "middle eastern", "latino hispanic" or null
+
+        One face — example (illustrative):
+        {{"0": {{"bbox": [12, 40, 180, 220], "age": 32, "gender": "Man", "emotion": "neutral", "race": "white"}}}}
+
+        Two faces — example:
+        {{"0": {{"bbox": [5, 10, 90, 110], "age": 28, "gender": "Woman", "emotion": "happy", "race": "asian"}}, "1": {{"bbox": [400, 20, 85, 100], "age": 41, "gender": "Man", "emotion": "sad", "race": "white"}}}}
+
+verl:
+  method: grpo
+  example_config: null
+  verl_root: null

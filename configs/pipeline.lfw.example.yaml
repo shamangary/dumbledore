@@ -1,0 +1,63 @@
+# LFW pipeline example (scikit-learn face crops). Copy to `configs/pipeline.yaml` or pass `--config`.
+# Stage 1: `pip install -e ".[lfw]"` then `run_stage1_images.sh` (or download_face_subset with this file).
+# `ground_truth.bbox` is off: LFW images are tight crops—attributes matter more than boxes. WIDER uses bbox: true.
+#
+# For full-scene in-the-wild images, use `pipeline.wider.example.yaml` instead.
+
+hf_model_id: google/gemma-4-E2B-it
+
+deepface:
+  model_name: Facenet512
+  detector_backend: opencv
+  include_facenet512: true
+  max_faces: 5
+  ground_truth:
+    bbox: false
+    age: true
+    gender: true
+    emotion: true
+    race: true
+    is_real: false
+
+data:
+  num_images: 100
+  train_ratio: 0.8
+  val_ratio: 0.1
+  seed: 42
+  raw_dir: data/raw_images
+  jsonl: data/gt.jsonl
+  parquet_dir: data/verl
+
+dataset:
+  name: lfw
+  config_name: null
+  split: train
+  image_column: image
+
+# Custom prompt must list the same per-face fields as `deepface.ground_truth` above (here: no bbox).
+# Only `{image_id}` is substituted; use `{{` / `}}` for literal braces.
+# For built-in system + auto user (with an LFW dataset line), set both to null.
+prompt:
+  system_instruction: |
+    You are a face-attribute assistant. The vision encoder shows the full image; this message has no
+    pixels. The reference answer in training is the dataset's pseudo–ground truth (not human labels).
+    Output exactly one JSON object — no markdown, no code fences, no extra text.
+  user: |
+    Sample id: {image_id}. Return one minified JSON object. Top-level keys are "0", "1", … in face order (box top, then x).
+    Per-face keys follow `deepface.ground_truth` (here: age, gender, emotion, race — no bbox for LFW); use null if unknown.
+
+    Value domains (match DeepFace `analyze` dominant_*):
+    - age: integer ~0–120 or null
+    - gender: "Man" or "Woman" or null
+    - emotion: "angry", "disgust", "fear", "happy", "sad", "surprise", "neutral" or null
+    - race: "asian", "indian", "black", "white", "middle eastern", "latino hispanic" or null
+
+    One face — example (illustrative):
+    {{"0": {{"age": 32, "gender": "Man", "emotion": "neutral", "race": "white"}}}}
+
+    No faces: {{}}
+
+verl:
+  method: grpo
+  example_config: null
+  verl_root: null

@@ -9,10 +9,6 @@ import inspect
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
 
 def main() -> int:
     import argparse
@@ -52,8 +48,6 @@ def main() -> int:
     from peft import LoraConfig
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from dumbledore.gt_schema import SYSTEM_INSTRUCTION
-
     df = pd.read_parquet(a.parquet, engine="pyarrow")
     if a.max_samples is not None:
         df = df.head(a.max_samples)
@@ -64,7 +58,9 @@ def main() -> int:
 
     def row_to_text(row) -> str:  # type: ignore[no-untyped-def]
         p, g = str(row["prompt"]), str(row["ground_truth"])
-        user = p.split(SYSTEM_INSTRUCTION, 1)[-1].lstrip() if SYSTEM_INSTRUCTION in p else p
+        # system + user are separated by a blank line (from `build_training_prompt`); SFT only needs the user turn
+        # here so the chat template can add system if the model card expects a single user message.
+        user = p.split("\n\n", 1)[1].lstrip() if "\n\n" in p else p
         messages = [{"role": "user", "content": user}, {"role": "assistant", "content": g}]
         return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)  # type: ignore[no-untyped-call]
 

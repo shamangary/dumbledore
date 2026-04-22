@@ -5,14 +5,12 @@ This folder holds **project-local** hints. Full PPO/GRPO/DAPO jobs are **defined
 
 - [`../grpo_gemma4_e2b.example.yaml`](../grpo_gemma4_e2b.example.yaml) – reward + data key names only; merge with an official `examples/.../config.yaml`.
 
-**Method choice:** set `verl.method` in [`../pipeline.example.yaml`](../pipeline.example.yaml) and follow verl’s guide for that algorithm (PPO, GRPO, etc.). The repo does not ship a runnable verl config because APIs change by release.
+**Method choice:** set `verl.method` in your pipeline YAML (e.g. [`../pipeline.example.yaml`](../pipeline.example.yaml) or the LFW / WIDER examples next to it) and follow verl’s guide for that algorithm (PPO, GRPO, etc.). The repo does not ship a runnable verl config because APIs change by release.
 
-Run:
+Run (same thing):
 
 ```bash
-./scripts/run_verl_rl.sh
-# or
-python scripts/verl_config_helper.py --config configs/pipeline.yaml
+./scripts/run_stage5_verl.sh
 ```
 
 Then paste the printed Hydra overrides onto the `python -m verl...` line from the matching verl example.

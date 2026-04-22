@@ -1,3 +1,0 @@
-# Pin verl (and Ray, vLLM/SGLang) to a single release or git SHA from your chosen recipe.
-# Example:
-# pip install git+https://github.com/verl-project/verl@v0.7.1

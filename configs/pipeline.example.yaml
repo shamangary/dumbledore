@@ -1,23 +1,25 @@
-# Master pipeline: copy to configs/pipeline.yaml and edit. Wire scripts with: --config configs/pipeline.yaml
+# Default pipeline template (LFW-oriented, minimal).
+# Copy to `configs/pipeline.yaml` (e.g. `./scripts/run_stage0_config.sh`).
 #
-# Example HF model ids (pick one; must match a Hub checkpoint you can train in verl):
-#   - google/gemma-4-E2B-it
-#   - google/gemma-4-4B-it
-#   - google/gemma-2-2b-it  (smaller smoke test)
+# Fuller examples:
+#   - pipeline.lfw.example.yaml  — LFW + long custom prompt text
+#   - pipeline.wider.example.yaml — WIDER FACE subset + prompt tuned for full-scene bboxes (CC BY-NC-ND 4.0)
 
 hf_model_id: google/gemma-4-E2B-it
 
 deepface:
   model_name: Facenet512
   detector_backend: opencv
-  # When true, run represent() and store 512-d embedding in ground truth. When false, facenet512 is [] in GT.
   include_facenet512: true
-  # Only "true" attributes are passed to DeepFace.analyze and included in analyze GT / prompts.
-  attributes:
+  max_faces: 5
+  ground_truth:
+    # LFW crops: prefer attributes over boxes (use `pipeline.wider.example.yaml` for bbox in GT)
+    bbox: false
     age: true
     gender: true
-    emotion: false
-    race: false
+    emotion: true
+    race: true
+    is_real: false
 
 data:
   num_images: 100
@@ -28,13 +30,19 @@ data:
   jsonl: data/gt.jsonl
   parquet_dir: data/verl
 
-# Default Hub dataset for scripts/download_face_subset.py (overridable via CLI)
 dataset:
-  # torchvision LFW: small, public; script may implement a special-case name "lfw"
   name: lfw
   config_name: null
   split: train
   image_column: image
+  # hf_id: CUHK-CSE/wider_face   # only when dataset.name is wider_face
+
+# `null` = auto user lists **only** fields enabled in `deepface.ground_truth` (must stay in sync if you edit one side).
+# `null` = built-in system + auto user (includes a one-line LFW note when `dataset.name` is lfw)
+prompt:
+  system_instruction: null
+  user: null
+  # by_dataset: { lfw: { system_instruction: null, user: null }, wider_face: { system_instruction: ..., user: ... } }
 
 verl:
   method: grpo

@@ -13,3 +13,4 @@ configs/pipeline.yaml
 *.parquet
 *.jsonl
 wandb/
+reports/

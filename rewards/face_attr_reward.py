@@ -1,24 +1,20 @@
 """
-verl custom reward: compare model `solution_str` to DeepFace `ground_truth` (DeepFaceGTV1 JSON).
+verl custom reward for RL: compare the policy output `solution_str` to the **pseudo** label in
+`ground_truth` (the DeepFace JSON string: indexed multi-face `{"0": {...}, "1": {...}}`).
 
-Pointwise combination (default):
-  w_emb * cos_sim( facenet512 ) + w_attr * (matched analyze keys / total keys) + w_schema * 1.0
-
-See verl: custom_reward_function.path / .name, signature:
-  (data_source, solution_str, ground_truth, extra_info=None) -> float
+The training row should provide: **text** `prompt` (request), **image** context via `extra_info["image_path"]`
+(full image for the VLM), and this **string** as the reference "correct" answer for scoring—never human
+annotations unless you replaced the pipeline.
 """
 from __future__ import annotations
 
 import json
-import math
 import re
 from typing import Any, Optional
 
-# Default weights; sum is not required to be 1 (verl may normalize in recipe)
-W_EMB: float = 0.4
-W_ATTR: float = 0.5
-W_SCHEMA: float = 0.1
+W_ATTR: float = 1.0
 AGE_TOL: float = 5.0
+BBOX_TOL: float = 2.0
 
 
 def _parse_json_object(text: str) -> Optional[dict[str, Any]]:
@@ -38,18 +34,6 @@ def _parse_json_object(text: str) -> Optional[dict[str, Any]]:
         return json.loads(t[o : c + 1])
     except json.JSONDecodeError:
         return None
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b) or not a:
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    v = dot / (na * nb)
-    return max(0.0, min(1.0, (v + 1.0) / 2.0))  # map [-1,1] -> [0,1] for non-negative score mix
 
 
 def _age_match(ga: Any, ra: Any) -> float:
@@ -73,34 +57,83 @@ def _str_match(ga: Any, ra: Any) -> float:
     return 1.0 if str(ga).lower().strip() == str(ra).lower().strip() else 0.0
 
 
-def score_analyze(gt_an: dict[str, Any], pr_an: dict[str, Any]) -> tuple[float, int]:
-    """Return (mean key score, number of keys considered)."""
-    if not gt_an and not pr_an:
-        return 1.0, 0
-    keys = set(gt_an.keys()) | set(pr_an.keys())
+def _bool_match(ga: Any, ra: Any) -> float:
+    if ga is None and ra is None:
+        return 1.0
+    if ga is None or ra is None or not isinstance(ga, (bool, int)) or not isinstance(ra, (bool, int)):
+        return 0.0
+    return 1.0 if bool(ga) == bool(ra) else 0.0
+
+
+def _bbox_match(ga: Any, ra: Any) -> float:
+    if ga is None and ra is None:
+        return 1.0
+    if not isinstance(ga, list) or not isinstance(ra, list) or len(ga) != 4 or len(ra) != 4:
+        return 0.0
+    try:
+        a = [float(x) for x in ga]
+        b = [float(x) for x in ra]
+    except (TypeError, ValueError):
+        return 0.0
+    if all(abs(x - y) <= BBOX_TOL for x, y in zip(a, b, strict=True)):
+        return 1.0
+    return 0.0
+
+
+def _indexed_face_keys(d: Any) -> list[str]:
+    if not isinstance(d, dict):
+        return []
+    out: list[str] = []
+    for k, v in d.items():
+        if not isinstance(k, str) or not k.isdigit() or not isinstance(v, dict):
+            continue
+        out.append(k)
+    return sorted(out, key=int)
+
+
+def _score_one_face(gt: dict[str, Any], pr: dict[str, Any]) -> float:
+    keys = [k for k in ("bbox", "age", "gender", "emotion", "race", "is_real") if k in gt]
     if not keys:
-        return 1.0, 0
+        return 0.0
     s = 0.0
     for k in keys:
-        g = gt_an.get(k)
-        p = pr_an.get(k) if isinstance(pr_an, dict) else None
+        g = gt[k]
+        p = pr.get(k)
         if k == "age":
             s += _age_match(g, p)
+        elif k == "bbox":
+            s += _bbox_match(g, p)
+        elif k == "is_real":
+            s += _bool_match(g, p)
         else:
             s += _str_match(g, p)
-    return s / len(keys), len(keys)
+    return s / len(keys)
 
 
-def compute_score(  # noqa: PLR0911 — verl entry name
+def _score_indexed_pairs(gt: dict[str, Any], pr: dict[str, Any]) -> float:
+    gks = _indexed_face_keys(gt)
+    if not gks:
+        return 0.0 if _indexed_face_keys(pr) else 1.0
+    scores: list[float] = []
+    for k in gks:
+        g = gt[k]
+        if not isinstance(g, dict):
+            scores.append(0.0)
+            continue
+        p = pr.get(k) if isinstance(pr, dict) else None
+        if not isinstance(p, dict):
+            scores.append(0.0)
+        else:
+            scores.append(_score_one_face(g, p))
+    return sum(scores) / len(scores)
+
+
+def compute_score(
     data_source: str,
     solution_str: str,
     ground_truth: str,
-    extra_info: Any = None,  # noqa: ARG001 — reserved for VLM
+    extra_info: Any = None,  # noqa: ARG001
 ) -> float:
-    """
-    verl calls this; return a scalar reward in a sensible range (e.g. 0-1 or unbounded per recipe).
-    We return a weighted score in [0, 1].
-    """
     _ = data_source
     if not isinstance(ground_truth, str):
         ground_truth = str(ground_truth)
@@ -108,42 +141,8 @@ def compute_score(  # noqa: PLR0911 — verl entry name
         gt = json.loads(ground_truth)
     except (json.JSONDecodeError, TypeError):
         return 0.0
-
     pred = _parse_json_object(solution_str)
-    if not isinstance(pred, dict) or not gt:
+    if not isinstance(pred, dict) or not isinstance(gt, dict):
         return 0.0
-
-    if str(pred.get("schema_version", "")) != str(gt.get("schema_version", "")):
-        sch = 0.0
-    else:
-        sch = 1.0
-
-    g_fn = gt.get("facenet512")
-    p_fn = pred.get("facenet512")
-    g_has_emb = isinstance(g_fn, list) and len(g_fn) == 512
-    p_has_emb = isinstance(p_fn, list) and len(p_fn) == 512
-    emb = 0.0
-    if g_has_emb and p_has_emb:
-        try:
-            gf = [float(x) for x in g_fn]
-            pf = [float(x) for x in p_fn]
-            emb = _cosine(gf, pf)
-        except (TypeError, ValueError):
-            emb = 0.0
-    w_emb = W_EMB if g_has_emb else 0.0
-
-    g_an = gt.get("analyze") if isinstance(gt.get("analyze"), dict) else {}
-    p_an = pred.get("analyze") if isinstance(pred.get("analyze"), dict) else {}
-    if not g_an:
-        attr_score = 1.0
-        w_attr = 0.0
-    else:
-        attr_score, _n = score_analyze(g_an, p_an)
-        w_attr = W_ATTR
-
-    w_s = W_SCHEMA
-    den = w_s + w_emb + w_attr
-    if den <= 0:
-        return 0.0
-    total = w_s * sch + w_emb * emb + w_attr * attr_score
-    return min(1.0, max(0.0, total / den))
+    s = W_ATTR * _score_indexed_pairs(gt, pred)
+    return min(1.0, max(0.0, s))

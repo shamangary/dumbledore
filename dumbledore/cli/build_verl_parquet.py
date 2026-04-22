@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Build verl-style Parquet from `extract_deepface_gt.py` JSONL: train/val/test splits.
+Build verl-style Parquet from `extract_deepface_gt` JSONL: train/val/test splits.
 
 Usage:
-  python scripts/build_verl_parquet.py --config configs/pipeline.yaml
-  python scripts/build_verl_parquet.py --jsonl data/gt.jsonl --out-dir data/verl
+  ./scripts/run_stage4_parquet.sh
+  python -m dumbledore.cli.build_verl_parquet --config configs/pipeline.yaml
+  python -m dumbledore.cli.build_verl_parquet --jsonl data/gt.jsonl --out-dir data/verl
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import random
 import sys
@@ -17,44 +17,34 @@ from pathlib import Path
 
 import pandas as pd
 
-_ROOT = Path(__file__).resolve().parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-from dumbledore.gt_schema import SYSTEM_INSTRUCTION, build_user_prompt, DEFAULT_ANALYZE_ACTIONS
-from dumbledore.pipeline_config import PipelineConfig, load_pipeline_config, SUPPORTED_ANALYZE_ATTRIBUTES
-
-
-def _image_id_for_path(p: str) -> str:
-    h = hashlib.sha256(p.encode("utf-8")).hexdigest()[:16]
-    return f"img_{h}"
+from dumbledore.gt_inspect import infer_ground_truth_output_config, parse_gt_keys
+from dumbledore.pipeline_config import GroundTruthOutputConfig, PipelineConfig, load_pipeline_config
+from dumbledore.prompts import (
+    build_training_prompt,
+    dataset_prompt_key,
+    get_effective_prompt_config,
+    image_id_for_path,
+    list_prompt_ground_truth_mismatches,
+)
 
 
-def _full_prompt_text(
-    image_id: str,
-    image_path: str,
-    analyze_keys: tuple[str, ...] | None,
-    include_facenet512: bool,
-) -> str:
-    user = build_user_prompt(
-        image_id=image_id,
-        image_path=image_path,
-        analyze_keys=analyze_keys,
-        include_facenet512=include_facenet512,
-    )
-    return f"{SYSTEM_INSTRUCTION}\n\n{user}"
-
-
-def _parse_gt_keys(gt_str: str) -> tuple[list[str], bool]:
-    """Infer analyze keys and whether facenet expected from one ground_truth JSON string."""
-    o = json.loads(gt_str)
-    an = o.get("analyze") if isinstance(o.get("analyze"), dict) else {}
-    keys = [k for k in SUPPORTED_ANALYZE_ATTRIBUTES if k in an]
-    if not keys and an:
-        keys = list(an.keys())
-    fn = o.get("facenet512")
-    has_fn = isinstance(fn, list) and len(fn) == 512
-    return keys, has_fn
+def _verl_rl_row_contract() -> dict:
+    """How verl / RL should interpret each Parquet row: text request + image + pseudo-GT target."""
+    return {
+        "inputs": {
+            "text": {"parquet_column": "prompt", "role": "user_request_and_json_schema"},
+            "image": {
+                "source": "absolute path in this JSON at key image_path (same as JSONL `image_path`)",
+                "role": "full_frame_vlm_context",
+                "whole_image": True,
+            },
+        },
+        "label": {
+            "parquet_column": "ground_truth",
+            "role": "pseudo_ground_truth_from_deepface",
+            "reward": "rewards/face_attr_reward.py:compute_score(solution_str, ground_truth, …)",
+        },
+    }
 
 
 def main() -> int:
@@ -73,6 +63,8 @@ def main() -> int:
     cfg: PipelineConfig | None = None
     if args.config is not None:
         cfg = load_pipeline_config(args.config)
+        for m in list_prompt_ground_truth_mismatches(cfg):
+            print(f"Warning: prompt vs deepface.ground_truth: {m}", file=sys.stderr)
 
     jsonl = args.jsonl or (Path(cfg.data.jsonl) if cfg else None)
     out_dir = args.out_dir or (Path(cfg.data.parquet_dir) if cfg else None)
@@ -85,21 +77,21 @@ def main() -> int:
     seed = args.seed if args.seed is not None else (cfg.data.seed if cfg else 42)
     max_rows = args.max_rows
 
-    analyze_keys_cfg: tuple[str, ...] | None = None
+    out_cfg: GroundTruthOutputConfig | None = None
     include_fn_cfg = True
     if cfg is not None:
-        analyze_keys_cfg = tuple(cfg.deepface.enabled_actions())
+        out_cfg = cfg.deepface.ground_truth
         include_fn_cfg = cfg.deepface.include_facenet512
-
     if not jsonl.is_file():
         print(f"Not found: {jsonl}", file=sys.stderr)
         return 1
     r = train_ratio + val_ratio
-    if r >= 1.0 or train_ratio <= 0 or val_ratio < 0:
-        print("Invalid split ratios; train+val must be < 1.0, train>0, val>=0", file=sys.stderr)
+    if r > 1.0 or train_ratio <= 0 or val_ratio < 0:
+        print("Invalid split ratios; train+val must be <= 1.0, train>0, val>=0", file=sys.stderr)
         return 1
 
     rows: list[dict] = []
+    out_fallback: GroundTruthOutputConfig | None = out_cfg
     with open(jsonl, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -108,21 +100,31 @@ def main() -> int:
             o = json.loads(line)
             ip = o["image_path"]
             gt = o["ground_truth"]
-            iid = _image_id_for_path(ip)
+            iid = image_id_for_path(ip)
+            if out_fallback is None:
+                out_fallback = infer_ground_truth_output_config(gt)
+            ocfg = out_cfg or out_fallback
+            # Facenet embeddings are not stored in `ground_truth`; this flag is from YAML or defaults to True.
+            include_fn = include_fn_cfg if cfg is not None else True
 
-            keys_inf, has_fn_inf = _parse_gt_keys(gt)
-            keys = list(analyze_keys_cfg) if analyze_keys_cfg is not None else keys_inf
-            include_fn = include_fn_cfg if cfg is not None else has_fn_inf
-
-            prompt = _full_prompt_text(iid, ip, tuple(keys) if keys else None, include_fn)
+            if cfg is not None:
+                pcfg = get_effective_prompt_config(cfg)
+                dkey = dataset_prompt_key(cfg.dataset.name)
+                prompt = build_training_prompt(iid, ocfg, pcfg, dataset_key=dkey)
+            elif isinstance(o.get("prompt"), str) and o["prompt"].strip():
+                prompt = o["prompt"]
+            else:
+                prompt = build_training_prompt(iid, ocfg, None)
+            keys = parse_gt_keys(gt)
             extra = json.dumps(
                 {
                     "image_id": iid,
                     "image_path": ip,
                     "modality": "text_or_vlm",
                     "whole_image": True,
-                    "analyze_keys": keys,
+                    "ground_truth_keys": keys,
                     "include_facenet512": include_fn,
+                    "verl_rl": _verl_rl_row_contract(),
                 },
                 ensure_ascii=False,
             )

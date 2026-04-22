@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dumbledore"
 version = "0.1.0"
-description = "DeepFace pseudo-GT, verl Parquet, VLM+RL reward"
+description = "Images to pseudo–ground truth, verl Parquet, VLM training and RL reward"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

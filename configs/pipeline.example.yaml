@@ -1,0 +1,42 @@
+# Master pipeline: copy to configs/pipeline.yaml and edit. Wire scripts with: --config configs/pipeline.yaml
+#
+# Example HF model ids (pick one; must match a Hub checkpoint you can train in verl):
+#   - google/gemma-4-E2B-it
+#   - google/gemma-4-4B-it
+#   - google/gemma-2-2b-it  (smaller smoke test)
+
+hf_model_id: google/gemma-4-E2B-it
+
+deepface:
+  model_name: Facenet512
+  detector_backend: opencv
+  # When true, run represent() and store 512-d embedding in ground truth. When false, facenet512 is [] in GT.
+  include_facenet512: true
+  # Only "true" attributes are passed to DeepFace.analyze and included in analyze GT / prompts.
+  attributes:
+    age: true
+    gender: true
+    emotion: false
+    race: false
+
+data:
+  num_images: 100
+  train_ratio: 0.8
+  val_ratio: 0.1
+  seed: 42
+  raw_dir: data/raw_images
+  jsonl: data/gt.jsonl
+  parquet_dir: data/verl
+
+# Default Hub dataset for scripts/download_face_subset.py (overridable via CLI)
+dataset:
+  # torchvision LFW: small, public; script may implement a special-case name "lfw"
+  name: lfw
+  config_name: null
+  split: train
+  image_column: image
+
+verl:
+  method: grpo
+  example_config: null
+  verl_root: null

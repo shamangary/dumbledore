@@ -1,0 +1,40 @@
+# Example fragment for verl: wire custom reward + data paths.
+# Prefer the master file `configs/pipeline.example.yaml` for model + DeepFace + data paths, then
+# merge this fragment (or the keys below) with a full verl `examples/.../config.yaml`.
+# Merge with a full recipe (e.g. from verl `examples/`) and pin verl to a specific git SHA
+# (see your recipe’s REQUIRED_VERL.txt if using verl-recipe).
+#
+# References:
+#   - https://verl.readthedocs.io/en/latest/preparation/reward_function.html
+#   - https://github.com/verl-project/verl
+#
+# Set paths relative to the repo root. Example reward module:
+#   dumbledore/rewards/face_attr_reward.py  -> function `compute_score`
+
+custom_reward_function:
+  path: rewards/face_attr_reward.py
+  name: compute_score
+
+# Dataset (Parquet) — adjust to your build_verl_parquet output
+data:
+  train_files: data/verl/train.parquet
+  val_files: data/verl/val.parquet
+  # test_files: data/verl/test.parquet
+
+# Policy model: use Hugging Face checkpoint for verl, not the .litertlm asset
+# actor_rollout_ref.model.path: google/gemma-4-E2B-it
+#
+# FSDP2 (example from verl docs; optional):
+# actor_rollout_ref:
+#   ref:
+#     strategy: fsdp2
+#   actor:
+#     strategy: fsdp2
+#   rollout:
+#     name: vllm
+#     tensor_model_parallel_size: 1
+#
+# GRPO: see verl "GRPO in verl" and examples under https://github.com/verl-project/verl
+
+# Placeholder keys — copy from an official `examples/grpo/.../config.yaml` in your
+# verl version and add the blocks above to connect reward + your Parquet.

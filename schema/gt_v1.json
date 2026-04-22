@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dumbledore.local/schema/gt_v1.json",
+  "title": "DeepFaceGTV1",
+  "type": "object",
+  "required": ["schema_version", "image_path", "facenet512", "analyze"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "image_path": { "type": "string" },
+    "facenet512": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 512,
+      "maxItems": 512
+    },
+    "analyze": { "type": "object" },
+    "deepface_metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

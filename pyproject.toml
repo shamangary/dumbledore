@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dumbledore"
+version = "0.1.0"
+description = "DeepFace GT + verl RL for Gemma 4 E2B"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0",
+  "pyarrow>=14.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "jsonschema>=4.0", "deepface>=0.0.93"]
+face = ["deepface>=0.0.93", "tf-keras", "tensorflow>=2.0"]
+sft = ["transformers>=4.50", "trl>=0.9", "torch>=2.0", "accelerate", "peft", "bitsandbytes; platform_system != 'Windows'"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dumbledore*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
